@@ -1,7 +1,8 @@
 # Data
-nba-api>=1.4.0
+nba-api>=1.4.0  # optional: only for notebooks; blocked from many cloud hosts
 pandas>=2.0.0
 numpy>=1.25.0
+pyarrow>=14.0.0
 
 # Analysis
 scipy>=1.11.0
