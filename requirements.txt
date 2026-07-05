@@ -1,0 +1,23 @@
+# Data
+nba-api>=1.4.0
+pandas>=2.0.0
+numpy>=1.25.0
+
+# Analysis
+scipy>=1.11.0
+statsmodels>=0.14.0
+
+# Visualization
+matplotlib>=3.7.0
+seaborn>=0.13.0
+mplcursors>=0.5.0
+
+# Jupyter
+jupyter>=1.0.0
+notebook>=7.0.0
+ipywidgets>=8.0.0
+
+# Utility
+tqdm>=4.65.0
+python-dotenv>=1.0.0
+pytest>=7.4.0
