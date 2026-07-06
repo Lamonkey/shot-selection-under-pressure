@@ -116,6 +116,68 @@ def shot_mix_bars(mix: pd.DataFrame, path) -> None:
     plt.close(fig)
 
 
+GOOD = "#0ca30c"     # status: shift toward more threes
+CRITICAL = "#d03b3b"  # status: contraction (fewer threes)
+
+
+def season_shift_bars(season_df: pd.DataFrame, path) -> None:
+    """Per-season clutch-minus-nonclutch 3PA shift; diverging around zero."""
+    df = season_df.sort_values("season")
+    fig, ax = plt.subplots(figsize=(9, 5))
+    colors = [CRITICAL if v < 0 else GOOD for v in df["shift_pp"]]
+    bars = ax.bar(df["season"].astype(str), df["shift_pp"], color=colors,
+                  width=0.66, edgecolor=SURFACE, linewidth=1)
+    for b, v in zip(bars, df["shift_pp"]):
+        ax.text(b.get_x() + b.get_width() / 2, v + (0.15 if v >= 0 else -0.15),
+                f"{v:+.1f}", ha="center", va="bottom" if v >= 0 else "top",
+                fontsize=8.5, color=INK_2)
+    ax.axhline(0, color=BASELINE, linewidth=1)
+    ax.set_ylim(-4, 7)
+    ax.set_yticks([-4, -2, 0, 2, 4, 6])
+    ax.set_yticklabels([f"{v:+d}pp" if v else "0" for v in [-4, -2, 0, 2, 4, 6]])
+    ax.grid(axis="x", visible=False)
+    ax.annotate("2026 Finals series\nlooked like this →", xy=(10, df.iloc[-1]["shift_pp"]),
+                xytext=(7.2, -3.4), fontsize=8.5, color=INK_2,
+                arrowprops=dict(arrowstyle="->", color=MUTED, lw=1))
+    _title(fig, "Do players really shoot fewer threes in the clutch? Usually not.",
+           "Clutch minus non-clutch 3PT attempt rate, by playoff year  ·  green = more threes when it matters, red = fewer")
+    fig.tight_layout(rect=(0, 0, 1, 0.9))
+    fig.savefig(path, bbox_inches="tight")
+    plt.close(fig)
+
+
+def state_confound_bars(state_df: pd.DataFrame, path) -> None:
+    """3PA rate by score state: clutch vs baseline. Reveals the confound."""
+    df = state_df.set_index("state").reindex(charts_state_order())
+    x = range(len(df))
+    fig, ax = plt.subplots(figsize=(9.2, 5.2))
+    w = 0.38
+    ax.bar([i - w / 2 for i in x], df["baseline_3r"], width=w, color=BASELINE,
+           edgecolor=SURFACE, linewidth=1, label="Rest of game (Q1-Q3)")
+    ax.bar([i + w / 2 for i in x], df["clutch_3r"], width=w, color=TEAM_COLORS["NY"],
+           edgecolor=SURFACE, linewidth=1, label="Clutch (last 5:00, within 5)")
+    for i, (_, r) in enumerate(df.iterrows()):
+        ax.text(i - w / 2, r["baseline_3r"] + 0.006, _pct(r["baseline_3r"]), ha="center", fontsize=8, color=INK_2)
+        ax.text(i + w / 2, r["clutch_3r"] + 0.006, _pct(r["clutch_3r"]), ha="center", fontsize=8, color=TEAM_COLORS["NY"], fontweight="bold")
+    ax.set_xticks(list(x))
+    ax.set_xticklabels(df.index, fontsize=9.5, color=INK_2)
+    ax.set_ylim(0, 0.5)
+    ax.set_yticks([0, 0.1, 0.2, 0.3, 0.4, 0.5])
+    ax.set_yticklabels([_pct(v) for v in [0, 0.1, 0.2, 0.3, 0.4, 0.5]])
+    ax.grid(axis="x", visible=False)
+    ax.legend(frameon=False, loc="upper right", fontsize=9, labelcolor=INK_2)
+    ax.set_xlabel("Score state, shooter's team perspective", fontsize=9, color=MUTED)
+    _title(fig, "It's the scoreboard, not the nerves: trailing teams hunt threes late",
+           "Playoff 3PT attempt rate by score state  ·  2016-2026, 156k shots  ·  the clutch 'contraction' is really clock-milking by leaders")
+    fig.tight_layout(rect=(0, 0, 1, 0.9))
+    fig.savefig(path, bbox_inches="tight")
+    plt.close(fig)
+
+
+def charts_state_order():
+    return ["Trailing 4+", "Trailing 1-3", "Tied", "Leading 1-3", "Leading 4+"]
+
+
 def player_dumbbell(players: pd.DataFrame, path) -> None:
     """Non-clutch vs clutch 3PT rate per player (Finals only).
 

@@ -15,7 +15,9 @@ from __future__ import annotations
 
 import json
 import tarfile
+import urllib.error
 import urllib.request
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 
 HOOPR_RAW = "https://raw.githubusercontent.com/sportsdataverse/hoopR-nba-raw/main"
@@ -64,6 +66,66 @@ def fetch_game_json(game_id: str) -> dict:
 
 def fetch_finals_games() -> list[dict]:
     return [fetch_game_json(gid) for gid in FINALS_2026_GAME_IDS]
+
+
+def fetch_schedule_seasons(seasons: list[int]) -> dict[int, Path]:
+    return {yr: fetch_schedule(yr) for yr in seasons}
+
+
+def playoff_game_ids(seasons: list[int]) -> "list[tuple[int, str]]":
+    """(season, game_id) for every completed playoff game in the given seasons.
+
+    Playoffs are ``season_type == 3`` in the ESPN schedule.
+    """
+    import pandas as pd
+
+    out: list[tuple[int, str]] = []
+    for yr in seasons:
+        sched = pd.read_parquet(fetch_schedule(yr))
+        po = sched[(sched["season_type"] == 3) & (sched["status_type_completed"])]
+        out.extend((yr, str(gid)) for gid in po["id"])
+    return out
+
+
+def _fetch_game_json_quiet(game_id: str) -> str | None:
+    """Download one game JSON, returning the cache path or None on failure."""
+    dest = RAW_DIR / "espn_games" / f"{game_id}.json"
+    try:
+        _download(f"{HOOPR_RAW}/nba/json/final/{game_id}.json", dest)
+        return str(dest)
+    except (urllib.error.URLError, OSError):
+        return None
+
+
+def fetch_games(game_ids: list[str], workers: int = 24, progress: bool = True) -> list[dict]:
+    """Download many game JSONs concurrently (cached) and load them.
+
+    Returns the list of successfully-loaded game dicts; missing/broken games
+    are skipped rather than aborting the batch.
+    """
+    (RAW_DIR / "espn_games").mkdir(parents=True, exist_ok=True)
+    paths: dict[str, str] = {}
+    done = 0
+    with ThreadPoolExecutor(max_workers=workers) as ex:
+        futs = {ex.submit(_fetch_game_json_quiet, gid): gid for gid in game_ids}
+        for fut in as_completed(futs):
+            done += 1
+            path = fut.result()
+            if path:
+                paths[futs[fut]] = path
+            if progress and done % 100 == 0:
+                print(f"  downloaded {done}/{len(game_ids)}")
+    games = []
+    for gid in game_ids:  # preserve input order
+        p = paths.get(gid)
+        if not p:
+            continue
+        try:
+            with open(p) as fh:
+                games.append(json.load(fh))
+        except (json.JSONDecodeError, OSError):
+            continue
+    return games
 
 
 def fetch_shotdetail_csv(name: str) -> Path:

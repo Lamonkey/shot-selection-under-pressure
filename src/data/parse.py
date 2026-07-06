@@ -8,6 +8,27 @@ import pandas as pd
 
 DIST_RE = re.compile(r"(\d+)-foot")
 RIM_TYPES = ("layup", "dunk", "tip")
+THREE_RE = re.compile(r"three[ -]point|3-point")
+
+
+def shot_value(play: dict) -> int | None:
+    """Points a field-goal attempt is worth: 2, 3, or None if it is not a FGA.
+
+    Recent ESPN JSON fills ``pointsAttempted``; older seasons (pre-2020) leave
+    it null and encode the value in the play text instead, where free throws are
+    also flagged ``shootingPlay`` and must be dropped.
+    """
+    pa = play.get("pointsAttempted")
+    if pa in (2, 3):
+        return pa
+    if pa == 1:  # free throw
+        return None
+    text = (play.get("text") or "").lower()
+    if "free throw" in text:
+        return None
+    if THREE_RE.search(text):
+        return 3
+    return 2  # any other field goal (layup, dunk, tip, two-point jumper, hook)
 
 
 def _player_map(game: dict) -> dict[str, str]:
@@ -64,14 +85,16 @@ def parse_game_shots(game: dict) -> pd.DataFrame:
     for p in plays:
         if not p.get("shootingPlay"):
             continue
-        pts = p.get("pointsAttempted")
-        if pts not in (2, 3):  # skip free throws
+        pts = shot_value(p)
+        if pts not in (2, 3):  # skip free throws / non-FGA
             continue
         made = bool(p.get("scoringPlay"))
         team_is_home = str(p.get("team.id")) == home_id
-        # ESPN scores are post-play; back out the shooter's points if it went in
+        # ESPN scores are post-play; back out the shooter's points if it went in.
+        # scoreValue is reliable on makes but occasionally 0 in old data -> fall
+        # back to the shot's own value.
         home_after, away_after = p["homeScore"], p["awayScore"]
-        score_value = p.get("scoreValue", 0) if made else 0
+        score_value = (p.get("scoreValue") or pts) if made else 0
         home_before = home_after - (score_value if team_is_home else 0)
         away_before = away_after - (score_value if not team_is_home else 0)
         margin_before = (home_before - away_before) if team_is_home else (away_before - home_before)
@@ -85,7 +108,7 @@ def parse_game_shots(game: dict) -> pd.DataFrame:
             clock_seconds = float(clock)
 
         distance = _shot_distance(p)
-        is_three = pts == 3
+        is_three = pts == 3  # noqa: PLR2004
         rows.append(
             {
                 "game_id": str(p["game_id"]),
@@ -109,4 +132,25 @@ def parse_finals_shots(games: list[dict]) -> pd.DataFrame:
     df = pd.concat([parse_game_shots(g) for g in games], ignore_index=True)
     order = {gid: i + 1 for i, gid in enumerate(sorted(df["game_id"].unique()))}
     df["game_num"] = df["game_id"].map(order)
+    return df
+
+
+def parse_games(games: list[dict], seasons: dict[str, int] | None = None) -> pd.DataFrame:
+    """Parse many games into one shots table, tolerating malformed games.
+
+    seasons: optional game_id -> season map, attached as a ``season`` column.
+    Games that fail to parse (empty plays, missing fields) are skipped.
+    """
+    frames = []
+    for g in games:
+        try:
+            plays = g.get("plays")
+            if not plays:
+                continue
+            frames.append(parse_game_shots(g))
+        except (KeyError, IndexError, TypeError):
+            continue
+    df = pd.concat(frames, ignore_index=True)
+    if seasons:
+        df["season"] = df["game_id"].map(seasons)
     return df
